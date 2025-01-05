@@ -9,7 +9,6 @@ export const signUpAction = async (formData: FormData) => {
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const supabase = await createClient();
-  const origin = (await headers()).get("origin");
 
   if (!email || !password) {
     return encodedRedirect(
@@ -19,24 +18,43 @@ export const signUpAction = async (formData: FormData) => {
     );
   }
 
+  const timestamp = new Date().toISOString();
+  
   const { error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
-    },
+      emailRedirectTo: undefined,
+      data: {
+        confirmed_at: timestamp,
+        email_confirmed_at: timestamp,
+        email_verified: true
+      }
+    }
   });
 
   if (error) {
-    console.error(error.code + " " + error.message);
     return encodedRedirect("error", "/sign-up", error.message);
-  } else {
-    return encodedRedirect(
-      "success",
-      "/sign-up",
-      "Thanks for signing up! Please check your email for a verification link.",
-    );
   }
+
+  await supabase.auth.updateUser({
+    data: { 
+      email_confirmed_at: timestamp,
+      confirmed_at: timestamp,
+      email_verified: true
+    }
+  });
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (signInError) {
+    return encodedRedirect("error", "/sign-in", signInError.message);
+  }
+
+  return redirect("/new");
 };
 
 export const signInAction = async (formData: FormData) => {
@@ -53,7 +71,7 @@ export const signInAction = async (formData: FormData) => {
     return encodedRedirect("error", "/sign-in", error.message);
   }
 
-  return redirect("/protected");
+  return redirect("/new");
 };
 
 export const forgotPasswordAction = async (formData: FormData) => {
