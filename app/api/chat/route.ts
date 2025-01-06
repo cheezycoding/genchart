@@ -4,37 +4,47 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    console.log('API request received');
+    console.log('=== API Request Started ===');
     const supabase = await createClient();
     
     // Get the authenticated user
-    const { data: { user } } = await supabase.auth.getUser();
-    console.log('Current user:', user?.id);
+    console.log('Fetching user...');
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      console.error('User auth error:', userError);
+      throw userError;
+    }
+    console.log('User ID:', user?.id);
 
-    // Read the body ONCE and store it
+    // Parse request body
+    console.log('Parsing request body...');
     const body = await request.json();
-    console.log('Request body:', body);
-
-    // Destructure from the stored body
+    console.log('Request body:', JSON.stringify(body, null, 2));
     let { message, conversationId } = body;
 
-    // If conversationId provided, verify it exists
+    // Conversation handling
+    console.log('Handling conversation...', { conversationId });
     if (conversationId) {
-      const { data: existingConv } = await supabase
+      console.log('Verifying existing conversation...');
+      const { data: existingConv, error: convCheckError } = await supabase
         .from('conversations')
         .select('id, user_id')
         .eq('id', conversationId)
         .single();
 
-      // Verify conversation exists and belongs to user
+      if (convCheckError) {
+        console.error('Conversation check error:', convCheckError);
+        throw convCheckError;
+      }
+
       if (!existingConv || existingConv.user_id !== user?.id) {
-        console.log('Conversation not found or unauthorized');
+        console.log('Creating new conversation as verification failed');
         conversationId = null;
       }
     }
 
-    // Create new conversation if needed
     if (!conversationId) {
+      console.log('Creating new conversation...');
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
         .insert({
@@ -49,10 +59,11 @@ export async function POST(request: Request) {
         throw convError;
       }
       conversationId = conversation.id;
-      console.log('Created new conversation:', conversationId);
+      console.log('New conversation created:', conversationId);
     }
 
     // Save user message
+    console.log('Saving user message...');
     const { error: messageError } = await supabase.from('messages').insert({
       conversation_id: conversationId,
       content: message,
@@ -60,11 +71,13 @@ export async function POST(request: Request) {
     });
 
     if (messageError) {
-      console.error('Error saving user message:', messageError);
+      console.error('User message save error:', messageError);
       throw messageError;
     }
+    console.log('User message saved successfully');
 
     // Get conversation history
+    console.log('Fetching conversation history...');
     const { data: history, error: historyError } = await supabase
       .from('messages')
       .select('*')
@@ -72,16 +85,18 @@ export async function POST(request: Request) {
       .order('created_at', { ascending: true });
 
     if (historyError) {
-      console.error('Error fetching history:', historyError);
+      console.error('History fetch error:', historyError);
       throw historyError;
     }
+    console.log('History fetched, message count:', history?.length);
 
     // Generate AI response
     console.log('Generating AI response...');
     const response = await generateResponse(message, history || []);
-    console.log('Raw AI response:', response);
+    console.log('AI response received:', JSON.stringify(response, null, 2));
     
-    // Extract flowchart data and clean node text
+    // Process flowchart data
+    console.log('Processing flowchart data...');
     let cleanContent = response.content;
     let flowchartData = null;
 
@@ -91,7 +106,7 @@ export async function POST(request: Request) {
         .replace(/\[(.*?)\]/g, (match, p1) => `[${p1.replace(/\s+/g, '_')}]`)
         .replace(/\((.*?)\)/g, (match, p1) => `(${p1.replace(/\s+/g, '_')})`)
         .trim();
-      console.log('Found flowchart data in response object:', flowchartData);
+      console.log('Processed flowchart data from response object');
     } else {
       const mermaidMatch = response.content.match(/```mermaid([\s\S]*?)```/);
       if (mermaidMatch) {
@@ -100,13 +115,14 @@ export async function POST(request: Request) {
           .replace(/\((.*?)\)/g, (match, p1) => `(${p1.replace(/\s+/g, '_')})`)
           .trim();
         cleanContent = response.content.replace(/```mermaid[\s\S]*?```/g, '').trim();
-        console.log('Extracted flowchart data from content:', flowchartData);
+        console.log('Extracted and processed flowchart data from content');
       }
     }
 
-    console.log('Final flowchart data:', flowchartData);
+    console.log('Final flowchart data present:', !!flowchartData);
 
-    // Save to Supabase
+    // Save AI response
+    console.log('Saving AI response...');
     const { error: aiMessageError } = await supabase.from('messages').insert({
       conversation_id: conversationId,
       content: cleanContent,
@@ -114,8 +130,13 @@ export async function POST(request: Request) {
       flowchart_data: flowchartData
     });
 
-    if (aiMessageError) throw aiMessageError;
+    if (aiMessageError) {
+      console.error('AI message save error:', aiMessageError);
+      throw aiMessageError;
+    }
+    console.log('AI response saved successfully');
 
+    console.log('=== API Request Completed Successfully ===');
     return NextResponse.json({
       content: cleanContent,
       flowchart_data: flowchartData,
@@ -123,9 +144,19 @@ export async function POST(request: Request) {
     });
 
   } catch (error) {
-    console.error('API error:', error);
+    console.error('=== API Error Details ===');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Full error object:', JSON.stringify(error, null, 2));
+    console.error('=== End API Error Details ===');
+
     return NextResponse.json(
-      { error: error.message }, 
+      { 
+        error: error.message,
+        errorType: error.name,
+        errorDetails: JSON.stringify(error, null, 2)
+      }, 
       { status: 500 }
     );
   }
