@@ -26,7 +26,7 @@ export default function ConversationSidebar() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          router.push('/login');
+          router.push('/sign-in');
           return;
         }
 
