@@ -2,9 +2,13 @@ import { createClient } from '@/utils/supabase/server';
 import { generateResponse } from '@/utils/ai/chat';
 import { NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+
 export async function POST(request: Request) {
+  const startTime = Date.now();
+  
   try {
-    console.log('=== API Request Started ===');
+    console.log('=== API Request Started ===', new Date().toISOString());
     const supabase = await createClient();
     
     // Get the authenticated user
@@ -16,11 +20,15 @@ export async function POST(request: Request) {
     }
     console.log('User ID:', user?.id);
 
+    // Add timeout check
+    if (Date.now() - startTime > 25000) {
+      throw new Error('Request timeout - user auth took too long');
+    }
+
     // Parse request body
-    console.log('Parsing request body...');
     const body = await request.json();
-    console.log('Request body:', JSON.stringify(body, null, 2));
     let { message, conversationId } = body;
+    console.log('Processing request for conversation:', conversationId);
 
     // Conversation handling
     console.log('Handling conversation...', { conversationId });
@@ -136,7 +144,14 @@ export async function POST(request: Request) {
     }
     console.log('AI response saved successfully');
 
+    // Add more timeout checks at key points
+    if (Date.now() - startTime > 25000) {
+      throw new Error('Request timeout - processing took too long');
+    }
+
     console.log('=== API Request Completed Successfully ===');
+    console.log('Total time:', Date.now() - startTime, 'ms');
+    
     return NextResponse.json({
       content: cleanContent,
       flowchart_data: flowchartData,
@@ -147,17 +162,18 @@ export async function POST(request: Request) {
     console.error('=== API Error Details ===');
     console.error('Error name:', error.name);
     console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('Full error object:', JSON.stringify(error, null, 2));
-    console.error('=== End API Error Details ===');
-
+    console.error('Total time until error:', Date.now() - startTime, 'ms');
+    
+    // Return appropriate status code
+    const status = error.message?.includes('timeout') ? 504 : 500;
+    
     return NextResponse.json(
       { 
         error: error.message,
         errorType: error.name,
         errorDetails: JSON.stringify(error, null, 2)
       }, 
-      { status: 500 }
+      { status }
     );
   }
 }
