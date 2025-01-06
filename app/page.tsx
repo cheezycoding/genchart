@@ -46,7 +46,7 @@ export default function Home() {
                 See Conversations
               </RainbowButton>
             ) : (
-              <RainbowButton asChild className="px-6" variant="secondary">
+              <RainbowButton asChild className="px-6">
                 <Link href="/sign-up">
                   Sign Up
                 </Link>
